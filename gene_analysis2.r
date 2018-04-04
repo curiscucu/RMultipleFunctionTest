@@ -10,41 +10,29 @@
 
 #3. 相关性分析，method=='correlation' || method=='cor' || method==3
 
- 
+#这是label的定义方法
+ #idx.case<-grep('01$',colnames(data),perl=T)
+ #label<-rep('control',dim(data)[2])
+ #label[idx.case]='case'
 
-gene_analyse<-function(data,method){
-	alpha=0.05#默认显著性水平为0.05 如果p.value大于0.05 则服从正态分布
+gene_analyse<-function(data,label,method){
+	alpha=0.05#默认显著性水平为0.05
 	data<-as.matrix(data)#防止其它的数据类型对下面计算产生干扰
 	
 	#1计算是否符合正太分布
 	if(dim(data)[1]*dim(data)[2]<3000){
-		norm_test<-shapiro.test(data)#适用于小样本3-5000，由于现在的样本数可以说是非常多，所以推荐用ks，
+		norm_test<-shapiro.test(data)#适用于小样本3-5000，由于现在的样本数可以说是非常多，所以推荐用ks
 	}else{
-		norm_test<-ks.test(jitter(data),data,pnorm)#因为数据不能有重复值，但是数据里确实有重复值，要用jitter()做一个小小的扰动
+		norm_test<-ks.test(jitter(data),'pnorm')#此处进行扰动，不会使得
 	}
 	norm_value<-norm_test$p.value
 	
-	#分为control test组
-	#这里由于是TCGA数据，分类根据barcode TCGA.02.0321.01 最后这个数字 	Tumor types range from 01 - 09, normal types from 10 - 19 and control samples from 20 - 29.
-
-	group<-c()
+	data1_record<-which(label==levels(as.factor(label))[1])
+	data2_record<-which(label==levels(as.factor(label))[2])
+	#将其根据label分，认为只有两组，control组与对照组
 	
-	for(i in 1:dim(data)[2])
-	{
-		Split<-unlist(strsplit(colnames(data)[i],"[.]")) 
-		group[i]=Split[4]
-		
-	}
-	newData<-rbind(data,group)#newData[12043,]为标签#此处可改进的 
-
-	num<-dim(newData)[1]
-
-	
-	data1_record<-which("11"==newData[num,])
-	data2_record<-which("01"==newData[num,])
-
-
 	result<-c()
+	
 	
 	#2各种检验
 	if(method=='comparative' || method=='comp' || method==1){
@@ -59,28 +47,37 @@ gene_analyse<-function(data,method){
 			}
 		}
 		
-		
 		result<-p.adjust(result)
-	}else if(method=='association' || method=='asc' || method==2){
-		data_ass<-apply(data,2,mean)#将样本转化成0,1矩阵的形式，认为每个样本若gene表达的均值高于总体均值则为高表达，低于则低表达
-	
-		data_association<-matrix(c(length(which(data_ass[data1_record]>mean(data)))
-								,length(which(data_ass[data2_record]>mean(data)))
-								,length(which(data_ass[data1_record]<mean(data)))
-								,length(which(data_ass[data2_record]<mean(data)))),
-								nrow=2,
-								dimnames=list(c('high','low'),c('case','control'))
-								)
-								
-		sample_num<-dim(data)[1]*dim(data)[2]
-		if(sample_num<40 || length(which(data>1))<0){  #样本数小于40或者每个样本的理论频数<1
-			result=fisher.test(data_association)
-		}
-		else{
-			result=chisq.test(data_association)
-		}
+		result<-as.matrix(result,ncol=1)
+		rownames(result)<-rownames(data)
 		
-	
+		
+	}else if(method=='association' || method=='asc' || method==2){
+		result<-c()
+		#构造矩阵,对每个gene进行分析
+		for(i in 1:dim(data)[1]){
+			data_trans<-rep(0,dim(data)[2])#同一个gene在不同样本中，若表达量高于均值则赋为1
+			data_trans[which(data[i,]>mean(data[i,]))]=1
+			
+			x1<-length(which(data_trans[data1_record]==1))
+			x2<-length(which(data_trans[data2_record]==1))
+			x3<-length(which(data_trans[data1_record]==0))
+			x4<-length(which(data_trans[data2_record]==0))
+		
+			data_association<-matrix(c(x1,x3,x2,x4),nrow=2,dimnames=list(c('high','low'),c('case','control')))
+			
+			sample_num<-x1+x2+x3+x4
+			
+			if(sample_num<40){  #样本数小于40或者每个样本的理论频数<1(后面条件自动满足)
+				result[i]=fisher.test(data_association)$p.value
+			}else{
+				result[i]=chisq.test(data_association)$p.value
+			}
+		}
+		result<-p.adjust(result)
+		names(result)<-rownames(data)
+
+		
 	}else if(method=='correlation' || method=='cor' || method==3){
 		if(norm_value>alpha){
 			 result<-cor(t(data),method='pearson')
